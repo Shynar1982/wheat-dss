@@ -27,11 +27,11 @@
         <div class='grid'>
             <div class='card'>
                 <h3>Прогноз урожайности</h3>
-                <div class='highlight' id='yield-value'>Загрузка...</div>
+                <div class='highlight' id='yield-value'>-</div>
             </div>
             <div class='card'>
                 <h3>Рекомендация</h3>
-                <p class='rec-text' id='rec-text'>Загрузка...</p>
+                <p class='rec-text' id='rec-text'>-</p>
             </div>
         </div>
         <div class='card' style='margin-top: 20px;'>
@@ -45,68 +45,64 @@
         async function loadFields() {
             const select = document.getElementById('field-select');
             try {
-                // Относительный путь работает от того порта, на котором открыта страница
                 const res = await fetch('/api/all-fields');
-                if (!res.ok) throw new Error(`Ошибка сервера: ${res.status}`);
-                
                 const fields = await res.json();
-                select.innerHTML = ''; // Очищаем
+                select.innerHTML = '';
                 
-                if (fields.length === 0) {
-                    select.innerHTML = '<option>В базе нет полей</option>';
-                    return;
-                }
-
                 fields.forEach(field => {
                     const option = document.createElement('option');
-                    option.value = field.field_id; // Берем field_id!
-                    option.textContent = `Поле №${field.field_id} (${field.name})`;
+                    option.value = field.field_id;
+                    option.textContent = ;
                     select.appendChild(option);
                 });
                 
-                // Загружаем данные для первого поля
-                loadData(fields[0].field_id);
+                if (fields.length > 0) loadData(fields[0].field_id);
             } catch (error) {
-                console.error(error);
-                // Выводим ошибку прямо на экран
-                select.innerHTML = `<option>Ошибка API: ${error.message}</option>`;
+                select.innerHTML = '<option>Ошибка загрузки полей</option>';
             }
         }
 
         async function loadData(fieldId) {
-            if (!fieldId) return;
             document.getElementById('yield-value').innerText = 'Загрузка...';
             document.getElementById('rec-text').innerText = 'Загрузка...';
+            if (myChart) { myChart.destroy(); myChart = null; }
 
+            // 1. Прогноз
             try {
-                const yieldRes = await fetch(`/v1/fields/${fieldId}/yield/predictions`);
-                const yieldData = await yieldRes.json();
-                document.getElementById('yield-value').innerText = yieldData.length > 0 ? yieldData[0].predicted_yield_t_ha + ' т/га' : 'Нет данных';
+                const res = await fetch();
+                const data = await res.json();
+                if (data && data.length > 0) {
+                    document.getElementById('yield-value').innerText = data[0].predicted_yield_t_ha + ' т/га';
+                } else {
+                    document.getElementById('yield-value').innerText = 'Нет прогноза';
+                }
+            } catch (e) { document.getElementById('yield-value').innerText = 'Нет данных'; }
 
-                const recRes = await fetch(`/v1/fields/${fieldId}/recommendations`);
-                const recData = await recRes.json();
-                document.getElementById('rec-text').innerText = recData.length > 0 ? recData[0].message_text : 'Нет рекомендаций';
+            // 2. Рекомендации
+            try {
+                const res = await fetch();
+                const data = await res.json();
+                document.getElementById('rec-text').innerText = (data && data.length > 0) ? data[0].message_text : 'Нет рекомендаций';
+            } catch (e) { document.getElementById('rec-text').innerText = 'Нет данных'; }
 
-                const ndviRes = await fetch(`/v1/fields/${fieldId}/indices`);
-                const ndviData = await ndviRes.json();
+            // 3. NDVI (график)
+            try {
+                const res = await fetch();
+                const ndviData = await res.json();
                 
-                const ctx = document.getElementById('ndviChart').getContext('2d');
-                if (myChart) myChart.destroy();
-
-                myChart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: ndviData.map(d => d.observed_at),
-                        datasets: [{ label: 'NDVI', data: ndviData.map(d => d.ndvi), borderColor: '#2ecc71', backgroundColor: 'rgba(46, 204, 113, 0.2)', fill: true }]
-                    },
-                    options: { responsive: true }
-                });
-            } catch (e) {
-                console.error(e);
-                document.getElementById('yield-value').innerText = 'Ошибка';
-            }
+                if (ndviData && ndviData.length > 0) {
+                    const ctx = document.getElementById('ndviChart').getContext('2d');
+                    myChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: ndviData.map(d => d.observed_at),
+                            datasets: [{ label: 'NDVI', data: ndviData.map(d => d.ndvi), borderColor: '#2ecc71', backgroundColor: 'rgba(46, 204, 113, 0.2)', fill: true }]
+                        },
+                        options: { responsive: true }
+                    });
+                }
+            } catch (e) { console.log('Нет данных NDVI'); }
         }
-
         document.addEventListener('DOMContentLoaded', loadFields);
     </script>
 </body>
