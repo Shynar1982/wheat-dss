@@ -5,14 +5,17 @@
     <title>Wheat DSS</title>
     <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
     <style>
-        body { font-family: Arial; background: #f4f4f9; padding: 20px; }
+        body { font-family: Arial, sans-serif; background: #f4f4f9; padding: 20px; margin: 0; }
         .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        select { padding: 8px; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; }
-        .grid { display: flex; gap: 20px; }
-        .card { flex: 1; background: #ecf0f1; padding: 15px; border-radius: 8px; }
-        .highlight { font-size: 24px; font-weight: bold; color: #e74c3c; text-align: center; }
-        .rec-text { font-style: italic; color: #27ae60; }
+        .header h1 { margin: 0; font-size: 28px; }
+        select { padding: 10px; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; cursor: pointer; }
+        .grid { display: flex; gap: 20px; margin-bottom: 20px; }
+        .card { flex: 1; background: #ecf0f1; padding: 20px; border-radius: 8px; }
+        .card h3 { margin-top: 0; font-size: 16px; color: #333; }
+        .highlight { font-size: 24px; font-weight: bold; color: #e74c3c; text-align: center; margin-top: 10px; }
+        .rec-text { font-style: italic; color: #27ae60; margin-top: 10px; }
+        .chart-container { background: #ecf0f1; padding: 20px; border-radius: 8px; }
     </style>
 </head>
 <body>
@@ -31,14 +34,16 @@
             </div>
             <div class='card'>
                 <h3>Рекомендация</h3>
-                <p class='rec-text' id='rec-text'>-</p>
+                <div class='rec-text' id='rec-text'>-</div>
             </div>
         </div>
-        <div class='card' style='margin-top: 20px;'>
+        
+        <div class='chart-container'>
             <h3>Динамика NDVI (Спутник Sentinel-2)</h3>
             <canvas id='ndviChart'></canvas>
         </div>
     </div>
+
     <script>
         let myChart = null;
 
@@ -52,7 +57,7 @@
                 fields.forEach(field => {
                     const option = document.createElement('option');
                     option.value = field.field_id;
-                    option.textContent = ;
+                    option.textContent = `Поле №${field.field_id} (${field.name})`;
                     select.appendChild(option);
                 });
                 
@@ -63,13 +68,14 @@
         }
 
         async function loadData(fieldId) {
+            if (!fieldId) return;
             document.getElementById('yield-value').innerText = 'Загрузка...';
             document.getElementById('rec-text').innerText = 'Загрузка...';
             if (myChart) { myChart.destroy(); myChart = null; }
 
             // 1. Прогноз
             try {
-                const res = await fetch();
+                const res = await fetch(`/v1/fields/${fieldId}/yield/predictions`);
                 const data = await res.json();
                 if (data && data.length > 0) {
                     document.getElementById('yield-value').innerText = data[0].predicted_yield_t_ha + ' т/га';
@@ -80,14 +86,14 @@
 
             // 2. Рекомендации
             try {
-                const res = await fetch();
+                const res = await fetch(`/v1/fields/${fieldId}/recommendations`);
                 const data = await res.json();
                 document.getElementById('rec-text').innerText = (data && data.length > 0) ? data[0].message_text : 'Нет рекомендаций';
             } catch (e) { document.getElementById('rec-text').innerText = 'Нет данных'; }
 
-            // 3. NDVI (график)
+            // 3. NDVI
             try {
-                const res = await fetch();
+                const res = await fetch(`/v1/fields/${fieldId}/indices`);
                 const ndviData = await res.json();
                 
                 if (ndviData && ndviData.length > 0) {
@@ -96,9 +102,9 @@
                         type: 'line',
                         data: {
                             labels: ndviData.map(d => d.observed_at),
-                            datasets: [{ label: 'NDVI', data: ndviData.map(d => d.ndvi), borderColor: '#2ecc71', backgroundColor: 'rgba(46, 204, 113, 0.2)', fill: true }]
+                            datasets: [{ label: 'NDVI', data: ndviData.map(d => d.ndvi), borderColor: '#2ecc71', backgroundColor: 'rgba(46, 204, 113, 0.2)', fill: true, tension: 0.3 }]
                         },
-                        options: { responsive: true }
+                        options: { responsive: true, scales: { y: { beginAtZero: true, max: 1 } } }
                     });
                 }
             } catch (e) { console.log('Нет данных NDVI'); }

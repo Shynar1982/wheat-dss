@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Wheat DSS v2</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body style="font-family: Arial; padding: 20px;">
+    <h1 style="color: red;">Wheat DSS (ТЕСТОВАЯ ВЕРСИЯ 2)</h1>
+    <p>Если вы видите этот текст, значит браузер загрузил новый файл!</p>
+    
+    <select id="fieldSelect" style="padding: 10px; font-size: 16px;">
+        <option value="">Загрузка полей...</option>
+    </select>
+
+    <script>
+        console.log("Запуск скрипта v2...");
+        fetch('/api/all-fields')
+            .then(response => {
+                if (!response.ok) throw new Error('Ошибка сети: ' + response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log("Данные получены:", data);
+                const select = document.getElementById('fieldSelect');
+                select.innerHTML = '';
+                if (data.length === 0) {
+                    select.innerHTML = '<option>База пуста</option>';
+                    return;
+                }
+                data.forEach(field => {
+                    const opt = document.createElement('option');
+                    opt.value = field.field_id;
+                    opt.textContent = 'Поле №' + field.field_id + ' (' + field.name + ')';
+                    select.appendChild(opt);
+                });
+            })
+            .catch(error => {
+                console.error("Ошибка JS:", error);
+                document.getElementById('fieldSelect').innerHTML = '<option>Ошибка: ' + error.message + '</option>';
+            });
+    </script>
+</body>
+</html>
