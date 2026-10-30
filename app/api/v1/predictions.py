@@ -7,14 +7,14 @@ from app.services.yield_predictor import YieldPrediction, train_and_predict
 router = APIRouter(prefix="/v1/fields", tags=["yield"])
 
 # 1. Этот эндпоинт мы уже имели - он показывает историю прогнозов
-@router.get("/{field_id}/yield/predictions")
+@router.get("/{field_id:int}/yield/predictions")
 async def get_predictions(field_id: int, db: AsyncSession = Depends(get_session)):
     stmt = select(YieldPrediction).where(YieldPrediction.field_id == field_id).order_by(YieldPrediction.id.desc())
     result = await db.execute(stmt)
     return result.scalars().all()
 
 # 2. НОВЫЙ ЭНДПОИНТ - запускает модель и делает новый прогноз
-@router.post("/{field_id}/yield/predict")
+@router.post("/{field_id:int}/yield/predict")
 async def run_prediction(field_id: int):
     try:
         # Вызываем нашу функцию из yield_predictor.py

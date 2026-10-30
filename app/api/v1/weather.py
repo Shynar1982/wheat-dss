@@ -6,7 +6,7 @@ from app.services.weather_client import WeatherDaily
 
 router = APIRouter(prefix="/v1/fields", tags=["weather"])
 
-@router.get("/{field_id}/weather")
+@router.get("/{field_id:int}/weather")
 async def get_field_weather(field_id: int, db: AsyncSession = Depends(get_session)):
     stmt = select(WeatherDaily).where(WeatherDaily.field_id == field_id).order_by(WeatherDaily.obs_date)
     result = await db.execute(stmt)

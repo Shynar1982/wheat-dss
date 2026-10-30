@@ -7,7 +7,7 @@ from app.services.sms_sender import send_sms
 
 router = APIRouter(prefix="/v1/fields", tags=["sms"])
 
-@router.post("/{field_id}/send_sms")
+@router.post("/{field_id:int}/send_sms")
 async def send_recommendation_sms(field_id: int, phone: str, db: AsyncSession = Depends(get_session)):
     # Находим последнюю рекомендацию
     stmt = select(Recommendation).where(Recommendation.field_id == field_id).order_by(Recommendation.id.desc()).limit(1)

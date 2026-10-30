@@ -6,7 +6,7 @@ from app.services.gee_client import SpectralIndex
 
 router = APIRouter(prefix="/v1/fields", tags=["indices"])
 
-@router.get("/{field_id}/indices")
+@router.get("/{field_id:int}/indices")
 async def get_field_indices(
     field_id: int, 
     start_date: str | None = None, 

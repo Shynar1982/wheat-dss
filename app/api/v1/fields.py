@@ -9,6 +9,14 @@ from app.schemas.field import FieldCreate, FieldRead
 
 router = APIRouter(prefix="/v1/fields", tags=["fields"])
 
+@router.get("/all")
+async def get_all_fields(db: AsyncSession = Depends(get_session)):
+    stmt = select(Field)
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+
 @router.post("", response_model=FieldRead, status_code=201)
 async def create_field(payload: FieldCreate, db: AsyncSession = Depends(get_session)):
     geom_json = json.dumps(payload.geom)
@@ -27,14 +35,3 @@ async def create_field(payload: FieldCreate, db: AsyncSession = Depends(get_sess
         geom=json.loads(row[3]),
     )
 
-@router.get("/{field_id}", response_model=FieldRead)
-async def get_field(field_id: int, db: AsyncSession = Depends(get_session)):
-    stmt = select(Field.field_id, Field.name, Field.area_ha, ST_AsGeoJSON(Field.geom)).where(Field.field_id == field_id)
-    row = (await db.execute(stmt)).first()
-    if not row:
-        raise HTTPException(404, "field not found")
-    return FieldRead(
-        field_id=row[0], name=row[1],
-        area_ha=float(row[2]) if row[2] is not None else None,
-        geom=json.loads(row[3]),
-    )
