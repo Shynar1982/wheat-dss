@@ -9,5 +9,4 @@ data/
 data.zip
 *.zip
 *.xlsx
-*.pkl
 *.db
