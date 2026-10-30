@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+psycopg2-binary
+geoalchemy2
+alembic
+pydantic
+pydantic-settings
+shapely
+earthengine-api
+httpx
+scikit-learn
+pandas
+joblib
+jinja2

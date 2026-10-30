@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang='ru'>
+<head>
+    <meta charset='UTF-8'>
+    <title>Wheat DSS</title>
+    <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+    <style>
+        body { font-family: Arial; background: #f4f4f9; padding: 20px; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .grid { display: flex; gap: 20px; }
+        .card { flex: 1; background: #ecf0f1; padding: 15px; border-radius: 8px; }
+        .highlight { font-size: 24px; font-weight: bold; color: #e74c3c; text-align: center; }
+        .rec-text { font-style: italic; color: #27ae60; }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <h1>Wheat DSS: Поле №1</h1>
+        <div class='grid'>
+            <div class='card'>
+                <h3>Прогноз урожайности</h3>
+                <div class='highlight' id='yield-value'>Загрузка...</div>
+            </div>
+            <div class='card'>
+                <h3>Рекомендация</h3>
+                <p class='rec-text' id='rec-text'>Загрузка...</p>
+            </div>
+        </div>
+        <div class='card' style='margin-top: 20px;'>
+            <h3>Динамика NDVI (Спутник Sentinel-2)</h3>
+            <canvas id='ndviChart'></canvas>
+        </div>
+    </div>
+    <script>
+        async function loadData() {
+            const yieldRes = await fetch('/v1/fields/1/yield/predictions');
+            const yieldData = await yieldRes.json();
+            if (yieldData.length > 0) document.getElementById('yield-value').innerText = yieldData[0].predicted_yield_t_ha + ' т/га';
+
+            const recRes = await fetch('/v1/fields/1/recommendations');
+            const recData = await recRes.json();
+            if (recData.length > 0) document.getElementById('rec-text').innerText = recData[0].message_text;
+
+            const ndviRes = await fetch('/v1/fields/1/indices');
+            const ndviData = await ndviRes.json();
+            const ctx = document.getElementById('ndviChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: ndviData.map(d => d.observed_at),
+                    datasets: [{ label: 'NDVI', data: ndviData.map(d => d.ndvi), borderColor: '#2ecc71', backgroundColor: 'rgba(46, 204, 113, 0.2)', fill: true, tension: 0.3 }]
+                },
+                options: { responsive: true, scales: { y: { beginAtZero: true, max: 1 } } }
+            });
+        }
+        loadData();
+    </script>
+</body>
+</html>
