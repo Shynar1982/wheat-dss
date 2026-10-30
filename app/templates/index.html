@@ -8,13 +8,12 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         body { font-family: Arial, sans-serif; background: #f4f4f9; padding: 20px; margin: 0; }
-        .container { max-width: 1100px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .header h1 { margin: 0; font-size: 28px; }
         .controls { display: flex; gap: 10px; align-items: center; }
         select { padding: 10px; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; cursor: pointer; }
         
-        /* Стили для кнопки */
         button { padding: 10px 20px; font-size: 16px; font-weight: bold; color: white; background: #3498db; border: none; border-radius: 5px; cursor: pointer; transition: 0.3s; }
         button:hover { background: #2980b9; }
         button:disabled { background: #95a5a6; cursor: not-allowed; }
@@ -31,8 +30,10 @@
         
         .chart-container { background: #ecf0f1; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
         #map { height: 400px; width: 100%; border-radius: 8px; margin-top: 10px; z-index: 1; }
-        .charts-row { display: flex; gap: 20px; }
-        .chart-half { flex: 1; background: #ecf0f1; padding: 20px; border-radius: 8px; }
+        
+        /* Теперь графиков 3, делаем их чуть уже */
+        .charts-row { display: flex; gap: 15px; flex-wrap: wrap; }
+        .chart-third { flex: 1; min-width: 300px; background: #ecf0f1; padding: 15px; border-radius: 8px; }
     </style>
 </head>
 <body>
@@ -49,7 +50,6 @@
                 <select id='field-select' onchange='loadData(this.value)'>
                     <option value=''>Загрузка полей...</option>
                 </select>
-                <!-- Новая кнопка -->
                 <button id="predict-btn" onclick="runPrediction()">Запустить модель (Predict)</button>
             </div>
         </div>
@@ -71,12 +71,16 @@
         </div>
 
         <div class='charts-row'>
-            <div class='chart-half'>
-                <h3>Динамика NDVI (Sentinel-2)</h3>
+            <div class='chart-third'>
+                <h3>Динамика NDVI</h3>
                 <canvas id='ndviChart' style="max-height: 250px;"></canvas>
             </div>
-            <div class='chart-half'>
-                <h3>Вклад факторов в прогноз (Feature Importance)</h3>
+            <div class='chart-third'>
+                <h3>Погода (Температура / Осадки)</h3>
+                <canvas id='weatherChart' style="max-height: 250px;"></canvas>
+            </div>
+            <div class='chart-third'>
+                <h3>Вклад факторов (Feature Importance)</h3>
                 <canvas id='featureChart' style="max-height: 250px;"></canvas>
             </div>
         </div>
@@ -84,6 +88,7 @@
 
     <script>
         let myChart = null;
+        let weatherChart = null;
         let featureChart = null;
         let allFieldsData = [];
         let currentFieldLayer = null;
@@ -131,29 +136,21 @@
             }
         }
 
-        // НОВАЯ ФУНКЦИЯ ДЛЯ ЗАПУСКА МОДЕЛИ
         async function runPrediction() {
             if (!currentFieldId) return;
             const btn = document.getElementById('predict-btn');
             const yieldText = document.getElementById('yield-value');
-            
-            // Блокируем кнопку и меняем текст, пока модель считает
             btn.disabled = true;
             btn.innerText = 'Расчет...';
             yieldText.innerText = 'Расчет модели...';
-
             try {
-                // Делаем POST-запрос к вашему API
                 const res = await fetch(`/v1/fields/${currentFieldId}/yield/predict`, { method: 'POST' });
                 if (!res.ok) throw new Error('Ошибка сервера');
-                
-                // После успешного пересчета, обновляем данные на экране
                 await loadData(currentFieldId); 
             } catch (e) {
                 alert('Не удалось запустить модель. Проверьте логи бэкенда.');
                 yieldText.innerText = 'Ошибка';
             } finally {
-                // Возвращаем кнопку в исходное состояние
                 btn.disabled = false;
                 btn.innerText = 'Запустить модель (Predict)';
             }
@@ -166,7 +163,9 @@
             document.getElementById('yield-value').innerText = 'Загрузка...';
             document.getElementById('rec-text').innerText = 'Загрузка...';
             if (myChart) { myChart.destroy(); myChart = null; }
+            if (weatherChart) { weatherChart.destroy(); weatherChart = null; }
 
+            // Карта
             const fieldInfo = allFieldsData.find(f => String(f.field_id) === String(fieldId));
             if (fieldInfo && fieldInfo.geom) {
                 if (currentFieldLayer) map.removeLayer(currentFieldLayer);
@@ -179,18 +178,21 @@
                 } catch(e) { console.error("Ошибка карты:", e); }
             }
 
+            // Прогноз
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/yield/predictions`);
                 const data = await res.json();
                 document.getElementById('yield-value').innerText = (data && data.length > 0) ? data[0].predicted_yield_t_ha + ' т/га' : 'Нет прогноза';
             } catch (e) { document.getElementById('yield-value').innerText = 'Нет данных'; }
 
+            // Рекомендации
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/recommendations`);
                 const data = await res.json();
                 document.getElementById('rec-text').innerText = (data && data.length > 0) ? data[0].message_text : 'Нет рекомендаций';
             } catch (e) { document.getElementById('rec-text').innerText = 'Нет данных'; }
 
+            // NDVI
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/indices`);
                 const ndviData = await res.json();
@@ -206,6 +208,67 @@
                     });
                 }
             } catch (e) { console.log('Нет данных NDVI'); }
+
+            // ПОГОДА (НОВЫЙ БЛОК)
+            try {
+                const res = await fetch(`/v1/fields/${fieldId}/weather`);
+                const weatherData = await res.json();
+                
+                if (weatherData && weatherData.length > 0) {
+                    const ctx = document.getElementById('weatherChart').getContext('2d');
+                    
+                    // ВАЖНО: Здесь мы предполагаем, что колонки называются 'date', 'temp', 'precip'.
+                    // Если в вашей базе они называются иначе (например, 'observed_at', 'temperature', 'precipitation'), 
+                    // вам нужно будет заменить эти слова в коде ниже:
+                    const labels = weatherData.map(d => d.obs_date || '');
+                    const temps = weatherData.map(d => d.t_max_c || 0);
+                    const precips = weatherData.map(d => d.precip_mm || 0);
+
+                    weatherChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets: [
+                                {
+                                    type: 'line',
+                                    label: 'Макс. темп (°C)',
+                                    data: temps,
+                                    borderColor: '#e67e22',
+                                    backgroundColor: '#e67e22',
+                                    yAxisID: 'y',
+                                    tension: 0.3
+                                },
+                                {
+                                    type: 'bar',
+                                    label: 'Осадки (мм)',
+                                    data: precips,
+                                    backgroundColor: 'rgba(52, 152, 219, 0.6)',
+                                    yAxisID: 'y1'
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    type: 'linear',
+                                    display: true,
+                                    position: 'left',
+                                    title: { display: true, text: 'Температура (°C)' }
+                                },
+                                y1: {
+                                    type: 'linear',
+                                    display: true,
+                                    position: 'right',
+                                    title: { display: true, text: 'Осадки (мм)' },
+                                    grid: { drawOnChartArea: false }
+                                }
+                            }
+                        }
+                    });
+                }
+            } catch (e) { console.log('Нет данных о погоде', e); }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
