@@ -3,10 +3,14 @@
 <head>
     <meta charset='UTF-8'>
     <title>Wheat DSS</title>
+    <!-- Подключаем Chart.js и Leaflet -->
     <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
     <style>
         body { font-family: Arial, sans-serif; background: #f4f4f9; padding: 20px; margin: 0; }
-        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .header h1 { margin: 0; font-size: 28px; }
         select { padding: 10px; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; cursor: pointer; }
@@ -15,7 +19,10 @@
         .card h3 { margin-top: 0; font-size: 16px; color: #333; }
         .highlight { font-size: 24px; font-weight: bold; color: #e74c3c; text-align: center; margin-top: 10px; }
         .rec-text { font-style: italic; color: #27ae60; margin-top: 10px; }
-        .chart-container { background: #ecf0f1; padding: 20px; border-radius: 8px; }
+        .chart-container { background: #ecf0f1; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        
+        /* Стили для карты */
+        #map { height: 400px; width: 100%; border-radius: 8px; margin-top: 10px; z-index: 1; }
     </style>
 </head>
 <body>
@@ -38,22 +45,39 @@
             </div>
         </div>
         
+        <!-- Блок с картой -->
+        <div class='chart-container'>
+            <h3>Контур поля на карте</h3>
+            <div id='map'></div>
+        </div>
+
         <div class='chart-container'>
             <h3>Динамика NDVI (Спутник Sentinel-2)</h3>
-            <canvas id='ndviChart'></canvas>
+            <canvas id='ndviChart' style="max-height: 300px;"></canvas>
         </div>
     </div>
 
     <script>
         let myChart = null;
+        let allFieldsData = []; // Храним данные всех полей здесь
+        let currentFieldLayer = null; // Слой для отрисовки полигона на карте
+
+        // Инициализация карты (центр Казахстана по умолчанию)
+        const map = L.map('map').setView([52.0, 66.0], 6); 
+        
+        // Подключаем спутниковые снимки (Esri World Imagery) - выглядят как реальные поля
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
 
         async function loadFields() {
             const select = document.getElementById('field-select');
             try {
                 const res = await fetch('/api/all-fields');
                 const fields = await res.json();
-                select.innerHTML = '';
+                allFieldsData = fields; // Сохраняем в глобальную переменную
                 
+                select.innerHTML = '';
                 fields.forEach(field => {
                     const option = document.createElement('option');
                     option.value = field.field_id;
@@ -73,29 +97,38 @@
             document.getElementById('rec-text').innerText = 'Загрузка...';
             if (myChart) { myChart.destroy(); myChart = null; }
 
-            // 1. Прогноз
+            // 1. Отрисовка карты
+            const fieldInfo = allFieldsData.find(f => String(f.field_id) === String(fieldId));
+            if (fieldInfo && fieldInfo.geom) {
+                if (currentFieldLayer) map.removeLayer(currentFieldLayer); // Удаляем старый контур
+                try {
+                    const geojsonObj = JSON.parse(fieldInfo.geom);
+                    currentFieldLayer = L.geoJSON(geojsonObj, {
+                        style: { color: '#e74c3c', weight: 3, fillColor: '#e74c3c', fillOpacity: 0.3 } // Красный контур
+                    }).addTo(map);
+                    // Автоматически приближаем карту к границам поля
+                    map.fitBounds(currentFieldLayer.getBounds(), { padding: [20, 20] }); 
+                } catch(e) { console.error("Ошибка отрисовки карты:", e); }
+            }
+
+            // 2. Прогноз
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/yield/predictions`);
                 const data = await res.json();
-                if (data && data.length > 0) {
-                    document.getElementById('yield-value').innerText = data[0].predicted_yield_t_ha + ' т/га';
-                } else {
-                    document.getElementById('yield-value').innerText = 'Нет прогноза';
-                }
+                document.getElementById('yield-value').innerText = (data && data.length > 0) ? data[0].predicted_yield_t_ha + ' т/га' : 'Нет прогноза';
             } catch (e) { document.getElementById('yield-value').innerText = 'Нет данных'; }
 
-            // 2. Рекомендации
+            // 3. Рекомендации
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/recommendations`);
                 const data = await res.json();
                 document.getElementById('rec-text').innerText = (data && data.length > 0) ? data[0].message_text : 'Нет рекомендаций';
             } catch (e) { document.getElementById('rec-text').innerText = 'Нет данных'; }
 
-            // 3. NDVI
+            // 4. NDVI
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/indices`);
                 const ndviData = await res.json();
-                
                 if (ndviData && ndviData.length > 0) {
                     const ctx = document.getElementById('ndviChart').getContext('2d');
                     myChart = new Chart(ctx, {
@@ -104,7 +137,7 @@
                             labels: ndviData.map(d => d.observed_at),
                             datasets: [{ label: 'NDVI', data: ndviData.map(d => d.ndvi), borderColor: '#2ecc71', backgroundColor: 'rgba(46, 204, 113, 0.2)', fill: true, tension: 0.3 }]
                         },
-                        options: { responsive: true, scales: { y: { beginAtZero: true, max: 1 } } }
+                        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1 } } }
                     });
                 }
             } catch (e) { console.log('Нет данных NDVI'); }
