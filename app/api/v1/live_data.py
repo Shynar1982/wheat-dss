@@ -129,19 +129,29 @@ async def get_live_field_ndvi(field_id: int, db: AsyncSession = Depends(get_sess
 
 @router.get("/api/fields/{field_id}/weeds")
 async def get_weed_analysis(field_id: int):
-    # В реальности здесь был бы запрос к Sentinel Hub (NDRE)
-    # Для демо мы делаем имитацию: засоренность зависит от ID поля
-    weed_percentage = (field_id % 20) + 5.5  # Случайное число от 5 до 25%
+    month = datetime.datetime.now().month
+    
+    # ЗИМНЯЯ ЛОГИКА (Ноябрь - Февраль)
+    if month >= 11 or month <= 2:
+        return {
+            "field_id": field_id,
+            "weed_percentage": 0,
+            "status": "Сезон завершен",
+            "recommendation": "Зимний период: сорняки в состоянии покоя. Планирование весенней обработки (боронование)."
+        }
+        
+    # ВЕСЕННЕ-ЛЕТНЯЯ ЛОГИКА (Демо)
+    weed_percentage = (field_id % 20) + 5.5 
     
     if weed_percentage > 15:
         status = "Высокая"
-        recommendation = "Рекомендуется дифференцированная обработка гербицидами (VRT) только на засоренных участках."
+        recommendation = "Рекомендуется дифференцированная обработка гербицидами (VRT)."
     elif weed_percentage > 8:
         status = "Средняя"
-        recommendation = "Рекомендуется выборочная обработка или ранневесеннее боронование."
+        recommendation = "Рекомендуется выборочная обработка или боронование."
     else:
         status = "Низкая"
-        recommendation = "Химическая обработка не требуется. Достаточно агротехнических мер."
+        recommendation = "Химическая обработка не требуется."
         
     return {
         "field_id": field_id,
