@@ -14,6 +14,7 @@ from app.api.v1.weather import router as weather_router
 from app.api.v1.recommendations import router as rec_router
 from app.api.v1.predictions import router as pred_router
 from app.api.v1.sms import router as sms_router
+from app.api.v1.live_data import router as live_data_router
 
 app = FastAPI(title="Wheat DSS", version="0.1.0")
 templates = Jinja2Templates(directory="app/templates")
@@ -24,6 +25,7 @@ app.include_router(weather_router)
 app.include_router(rec_router)
 app.include_router(pred_router)
 app.include_router(sms_router)
+app.include_router(live_data_router)
 
 @app.get("/api/all-fields")
 async def get_all_fields_direct(db: AsyncSession = Depends(get_session)):

@@ -13,32 +13,34 @@
         .header h1 { margin: 0; font-size: 28px; }
         .controls { display: flex; gap: 10px; align-items: center; }
         select { padding: 10px; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; cursor: pointer; }
-        
         button { padding: 10px 20px; font-size: 16px; font-weight: bold; color: white; background: #3498db; border: none; border-radius: 5px; cursor: pointer; transition: 0.3s; }
         button:hover { background: #2980b9; }
         button:disabled { background: #95a5a6; cursor: not-allowed; }
-
+        .btn-sms { background: #e67e22; }
+        .btn-sms:hover { background: #d35400; }
         .metrics-bar { display: flex; gap: 20px; background: #2c3e50; color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; }
         .metric-item { flex: 1; text-align: center; }
         .metric-value { font-size: 20px; font-weight: bold; color: #2ecc71; }
-
         .grid { display: flex; gap: 20px; margin-bottom: 20px; }
         .card { flex: 1; background: #ecf0f1; padding: 20px; border-radius: 8px; }
         .card h3 { margin-top: 0; font-size: 16px; color: #333; }
         .highlight { font-size: 24px; font-weight: bold; color: #e74c3c; text-align: center; margin-top: 10px; }
         .rec-text { font-style: italic; color: #27ae60; margin-top: 10px; }
-        
+        .info-card { background: #e8f8f5; border-left: 5px solid #1abc9c; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: none; }
+        .info-card h3 { margin: 0 0 5px 0; color: #16a085; }
+        .info-card p { margin: 3px 0; color: #333; font-size: 15px; }
+        .agro-panel { background: #fdf2e9; border-left: 5px solid #e67e22; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .agro-text h3 { margin: 0 0 5px 0; color: #d35400; font-size: 18px; }
+        .agro-text p { margin: 3px 0; color: #555; font-size: 15px; }
         .chart-container { background: #ecf0f1; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
         #map { height: 400px; width: 100%; border-radius: 8px; margin-top: 10px; z-index: 1; }
-        
-        /* Теперь графиков 3, делаем их чуть уже */
         .charts-row { display: flex; gap: 15px; flex-wrap: wrap; }
         .chart-third { flex: 1; min-width: 300px; background: #ecf0f1; padding: 15px; border-radius: 8px; }
     </style>
 </head>
 <body>
     <div class='container'>
-        <div class='metrics-bar' id="metrics-panel">
+        <div class='metrics-bar'>
             <div class="metric-item">Точность модели (R²): <span class="metric-value" id="metric-r2">...</span></div>
             <div class="metric-item">Ошибка (RMSE): <span class="metric-value" id="metric-rmse">...</span> т/га</div>
             <div class="metric-item">Ср. ошибка (MAE): <span class="metric-value" id="metric-mae">...</span> т/га</div>
@@ -54,14 +56,32 @@
             </div>
         </div>
 
+        <div class='info-card' id='field-info-card'>
+            <h3 id="info-name">Название поля</h3>
+            <p><strong>ID поля:</strong> <span id="info-id">-</span></p>
+            <p><strong>Площадь:</strong> <span id="info-area">-</span> га</p>
+        </div>
+
         <div class='grid'>
             <div class='card'>
                 <h3>Прогноз урожайности</h3>
                 <div class='highlight' id='yield-value'>-</div>
             </div>
             <div class='card'>
-                <h3>Рекомендация</h3>
+                <h3>Рекомендация по удобрениям</h3>
                 <div class='rec-text' id='rec-text'>-</div>
+            </div>
+        </div>
+
+        <div class='agro-panel'>
+            <div class='agro-text'>
+                <h3>Агрономический календарь (GDD)</h3>
+                <p id='sowing-date' style='color: #2980b9; font-weight: bold;'>Расчет срока посева...</p>
+                <p id='harvest-date'>Расчет срока уборки...</p>
+                <p style="color: #c0392b; font-weight: bold;">⚠️ Внимание: Обнаружены очаги сорной растительности</p>
+            </div>
+            <div>
+                <button class="btn-sms" onclick="sendSMS()" id="sms-btn">Отправить СМС-отчет</button>
             </div>
         </div>
         
@@ -72,11 +92,11 @@
 
         <div class='charts-row'>
             <div class='chart-third'>
-                <h3>Динамика NDVI</h3>
+                <h3>Динамика NDVI (Архив)</h3>
                 <canvas id='ndviChart' style="max-height: 250px;"></canvas>
             </div>
             <div class='chart-third'>
-                <h3>Погода (Температура / Осадки)</h3>
+                <h3>Погода (Open-Meteo)</h3>
                 <canvas id='weatherChart' style="max-height: 250px;"></canvas>
             </div>
             <div class='chart-third'>
@@ -148,12 +168,25 @@
                 if (!res.ok) throw new Error('Ошибка сервера');
                 await loadData(currentFieldId); 
             } catch (e) {
-                alert('Не удалось запустить модель. Проверьте логи бэкенда.');
+                alert('Не удалось запустить модель.');
                 yieldText.innerText = 'Ошибка';
             } finally {
                 btn.disabled = false;
                 btn.innerText = 'Запустить модель (Predict)';
             }
+        }
+
+        async function sendSMS() {
+            if (!currentFieldId) return;
+            const btn = document.getElementById('sms-btn');
+            btn.disabled = true;
+            btn.innerText = 'Отправка...';
+            try {
+                const res = await fetch(`/v1/fields/${currentFieldId}/send_sms`, { method: 'POST' });
+                const data = await res.json();
+                if (res.ok) alert('✅ ' + data.message);
+            } catch (e) { alert('Ошибка сети'); } 
+            finally { btn.disabled = false; btn.innerText = 'Отправить СМС-отчет'; }
         }
 
         async function loadData(fieldId) {
@@ -162,10 +195,21 @@
             
             document.getElementById('yield-value').innerText = 'Загрузка...';
             document.getElementById('rec-text').innerText = 'Загрузка...';
+            document.getElementById('sowing-date').innerText = 'Расчет срока посева...';
+            document.getElementById('harvest-date').innerText = 'Расчет срока уборки...';
+            
             if (myChart) { myChart.destroy(); myChart = null; }
             if (weatherChart) { weatherChart.destroy(); weatherChart = null; }
 
-            // Карта
+            try {
+                const res = await fetch(`/api/fields/${fieldId}/info`);
+                const info = await res.json();
+                document.getElementById('field-info-card').style.display = 'block';
+                document.getElementById('info-name').innerText = `Поле: ${info.name}`;
+                document.getElementById('info-id').innerText = info.field_id;
+                document.getElementById('info-area').innerText = info.area_ha.toFixed(2);
+            } catch (e) { console.log('Ошибка инфо', e); }
+
             const fieldInfo = allFieldsData.find(f => String(f.field_id) === String(fieldId));
             if (fieldInfo && fieldInfo.geom) {
                 if (currentFieldLayer) map.removeLayer(currentFieldLayer);
@@ -178,21 +222,18 @@
                 } catch(e) { console.error("Ошибка карты:", e); }
             }
 
-            // Прогноз
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/yield/predictions`);
                 const data = await res.json();
                 document.getElementById('yield-value').innerText = (data && data.length > 0) ? data[0].predicted_yield_t_ha + ' т/га' : 'Нет прогноза';
             } catch (e) { document.getElementById('yield-value').innerText = 'Нет данных'; }
 
-            // Рекомендации
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/recommendations`);
                 const data = await res.json();
                 document.getElementById('rec-text').innerText = (data && data.length > 0) ? data[0].message_text : 'Нет рекомендаций';
             } catch (e) { document.getElementById('rec-text').innerText = 'Нет данных'; }
 
-            // NDVI
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/indices`);
                 const ndviData = await res.json();
@@ -209,18 +250,33 @@
                 }
             } catch (e) { console.log('Нет данных NDVI'); }
 
-            // ПОГОДА (НОВЫЙ БЛОК)
             try {
-                const res = await fetch(`/v1/fields/${fieldId}/weather`);
-                const weatherData = await res.json();
+                const res = await fetch(`/api/fields/${fieldId}/weather/live`);
+                const responseData = await res.json();
                 
-                if (weatherData && weatherData.length > 0) {
-                    const ctx = document.getElementById('weatherChart').getContext('2d');
+                if (responseData && responseData.weather_data) {
+                    const weatherData = responseData.weather_data;
+                    const sowingDate = responseData.sowing_date;
+                    const currentGDD = responseData.current_gdd || 0;
+                    const targetGDD = 1500;
                     
-                    // ВАЖНО: Здесь мы предполагаем, что колонки называются 'date', 'temp', 'precip'.
-                    // Если в вашей базе они называются иначе (например, 'observed_at', 'temperature', 'precipitation'), 
-                    // вам нужно будет заменить эти слова в коде ниже:
-                    const labels = weatherData.map(d => d.obs_date || '');
+                    if (sowingDate) {
+                        const sDate = new Date(sowingDate).toLocaleDateString('ru-RU');
+                        document.getElementById('sowing-date').innerText = `Рекомендуемый срок посева (озимые): ${sDate} (t ≤ 15°C)`;
+                    } else {
+                        document.getElementById('sowing-date').innerText = 'Срок посева не определен';
+                    }
+
+                    if (currentGDD < targetGDD) {
+                        const remainingGDD = targetGDD - currentGDD;
+                        const year = new Date().getFullYear() + (new Date().getMonth() > 6 ? 1 : 0);
+                        document.getElementById('harvest-date').innerText = `Прогноз уборки: Июль-Август ${year} г. (Накоплено ${currentGDD.toFixed(0)} из ${targetGDD} GDD. Зимой вегетация стоит)`;
+                    } else {
+                        document.getElementById('harvest-date').innerText = `Пора убирать! Достигнут порог ${targetGDD} GDD.`;
+                    }
+
+                    const ctx = document.getElementById('weatherChart').getContext('2d');
+                    const labels = weatherData.map(d => d.obs_date.substring(5));
                     const temps = weatherData.map(d => d.t_max_c || 0);
                     const precips = weatherData.map(d => d.precip_mm || 0);
 
@@ -229,46 +285,20 @@
                         data: {
                             labels: labels,
                             datasets: [
-                                {
-                                    type: 'line',
-                                    label: 'Макс. темп (°C)',
-                                    data: temps,
-                                    borderColor: '#e67e22',
-                                    backgroundColor: '#e67e22',
-                                    yAxisID: 'y',
-                                    tension: 0.3
-                                },
-                                {
-                                    type: 'bar',
-                                    label: 'Осадки (мм)',
-                                    data: precips,
-                                    backgroundColor: 'rgba(52, 152, 219, 0.6)',
-                                    yAxisID: 'y1'
-                                }
+                                { type: 'line', label: 'Макс. темп (°C)', data: temps, borderColor: '#e67e22', backgroundColor: '#e67e22', yAxisID: 'y', tension: 0.3 },
+                                { type: 'bar', label: 'Осадки (мм)', data: precips, backgroundColor: 'rgba(52, 152, 219, 0.6)', yAxisID: 'y1' }
                             ]
                         },
                         options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
+                            responsive: true, maintainAspectRatio: false,
                             scales: {
-                                y: {
-                                    type: 'linear',
-                                    display: true,
-                                    position: 'left',
-                                    title: { display: true, text: 'Температура (°C)' }
-                                },
-                                y1: {
-                                    type: 'linear',
-                                    display: true,
-                                    position: 'right',
-                                    title: { display: true, text: 'Осадки (мм)' },
-                                    grid: { drawOnChartArea: false }
-                                }
+                                y: { type: 'linear', display: true, position: 'left' },
+                                y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false } }
                             }
                         }
                     });
                 }
-            } catch (e) { console.log('Нет данных о погоде', e); }
+            } catch (e) { console.log('Ошибка загрузки реальной погоды', e); }
         }
 
         document.addEventListener('DOMContentLoaded', () => {

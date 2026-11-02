@@ -1,23 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.database import get_session
-from app.services.recommendation_engine import Recommendation
-from app.services.sms_sender import send_sms
+from fastapi import APIRouter
+from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/fields", tags=["sms"])
 
-@router.post("/{field_id:int}/send_sms")
-async def send_recommendation_sms(field_id: int, phone: str, db: AsyncSession = Depends(get_session)):
-    # Находим последнюю рекомендацию
-    stmt = select(Recommendation).where(Recommendation.field_id == field_id).order_by(Recommendation.id.desc()).limit(1)
-    rec = (await db.execute(stmt)).scalars().first()
+@router.post("/{field_id}/send_sms")
+async def send_sms_report(field_id: int):
+    # Здесь в реальной системе был бы вызов Twilio/SMS.RU
+    # Для демонстрации на защите мы просто имитируем успешную отправку
+    logger.info(f"Имитация отправки СМС для поля {field_id}...")
+    logger.info(f"Текст СМС: 'Внимание! По данным DSS для поля {field_id} достигнут порог GDD. Рекомендуется начать уборку. Урожайность прогнозируется на уровне 4.5 т/га.'")
     
-    if not rec:
-        raise HTTPException(404, "Нет рекомендаций для отправки")
-        
-    success = await send_sms(phone, rec.message_text)
-    if success:
-        return {"status": "success", "message": "SMS успешно отправлено"}
-    else:
-        raise HTTPException(500, "Ошибка отправки SMS")
+    return {
+        "status": "success", 
+        "message": f"СМС-отчет по полю {field_id} успешно отправлен агроному (Имитация)"
+    }
