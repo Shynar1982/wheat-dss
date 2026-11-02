@@ -65,8 +65,9 @@
 
         <div class='grid'>
             <div class='card'>
-                <h3>Прогноз урожайности</h3>
+                <h3 id='yield-title'>Прогноз урожайности</h3>
                 <div class='highlight' id='yield-value'>-</div>
+                <div id='yield-subtext' style='text-align: center; font-size: 12px; color: #7f8c8d; margin-top: 5px;'></div>
             </div>
             <div class='card'>
                 <h3>Рекомендация по удобрениям</h3>
@@ -210,7 +211,26 @@
             try {
                 const res = await fetch(`/v1/fields/${fieldId}/yield/predictions`);
                 const data = await res.json();
-                document.getElementById('yield-value').innerText = (data && data.length > 0) ? data[0].predicted_yield_t_ha + ' т/га' : 'Нет прогноза';
+                const currentM = new Date().getMonth() + 1;
+                const currentY = new Date().getFullYear();
+                
+                if (data && data.length > 0) {
+                    document.getElementById('yield-value').innerText = data[0].predicted_yield_t_ha + ' т/га';
+                    
+                    // Меняем терминологию в зависимости от сезона
+                    if (currentM >= 9 || currentM <= 2) {
+                        // Осень и зима (Сентябрь - Февраль)
+                        document.getElementById('yield-title').innerText = 'Итоговая урожайность';
+                        document.getElementById('yield-subtext').innerText = `(ретроспективная оценка за сезон ${currentY} г.)`;
+                    } else {
+                        // Весна и лето (Март - Август)
+                        document.getElementById('yield-title').innerText = 'Прогноз урожайности';
+                        document.getElementById('yield-subtext').innerText = `(ожидаемый результат на ${currentY} г.)`;
+                    }
+                } else {
+                    document.getElementById('yield-value').innerText = 'Нет данных';
+                    document.getElementById('yield-subtext').innerText = '';
+                }
             } catch (e) { document.getElementById('yield-value').innerText = 'Нет данных'; }
 
             try {
