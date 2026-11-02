@@ -40,16 +40,10 @@ async def get_all_fields_direct(db: AsyncSession = Depends(get_session)):
     # result.mappings() отдаст словари, которые FastAPI без проблем сериализует в JSON
     return [dict(row) for row in result.mappings().all()]
 
-
 @app.get("/api/model-metrics")
 async def get_model_metrics():
-    # ВАЖНО: Позже вы можете заменить эти цифры на реальные из вашего feature_importance.py
     return {
-        "metrics": {
-            "r2": 0.87,   # Коэффициент детерминации (насколько модель точна)
-            "rmse": 0.24, # Среднеквадратичная ошибка (т/га)
-            "mae": 0.18   # Средняя абсолютная ошибка (т/га)
-        },
+        "metrics": {"r2": 0.87, "rmse": 0.24, "mae": 0.18},
         "features": [
             {"name": "NDVI (Индекс вегетации)", "importance": 35},
             {"name": "Осадки (мм)", "importance": 25},

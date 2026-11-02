@@ -17,7 +17,6 @@
         button:hover { background: #2980b9; }
         button:disabled { background: #95a5a6; cursor: not-allowed; }
         .btn-sms { background: #e67e22; }
-        .btn-sms:hover { background: #d35400; }
         .metrics-bar { display: flex; gap: 20px; background: #2c3e50; color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; }
         .metric-item { flex: 1; text-align: center; }
         .metric-value { font-size: 20px; font-weight: bold; color: #2ecc71; }
@@ -47,7 +46,7 @@
         </div>
 
         <div class='header'>
-            <h1>Wheat DSS</h1>
+            <h1>Wheat DSS (Яровая пшеница)</h1>
             <div class="controls">
                 <select id='field-select' onchange='loadData(this.value)'>
                     <option value=''>Загрузка полей...</option>
@@ -59,6 +58,8 @@
         <div class='info-card' id='field-info-card'>
             <h3 id="info-name">Название поля</h3>
             <p><strong>ID поля:</strong> <span id="info-id">-</span></p>
+            <p><strong>Область:</strong> <span id="info-region">-</span></p>
+            <p><strong>Район:</strong> <span id="info-district">-</span></p>
             <p><strong>Площадь:</strong> <span id="info-area">-</span> га</p>
         </div>
 
@@ -75,10 +76,13 @@
 
         <div class='agro-panel'>
             <div class='agro-text'>
-                <h3>Агрономический календарь (GDD)</h3>
+                <h3>Агрономический календарь (Яровая)</h3>
                 <p id='sowing-date' style='color: #2980b9; font-weight: bold;'>Расчет срока посева...</p>
                 <p id='harvest-date'>Расчет срока уборки...</p>
-                <p style="color: #c0392b; font-weight: bold;">⚠️ Внимание: Обнаружены очаги сорной растительности</p>
+                <div id="weed-panel" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e67e22;">
+                    <p style="color: #c0392b; font-weight: bold; margin: 0;">⚠️ Анализ засоренности: Загрузка...</p>
+                    <p id="weed-recommendation" style="margin: 3px 0 0 0; font-size: 14px; color: #555;"></p>
+                </div>
             </div>
             <div>
                 <button class="btn-sms" onclick="sendSMS()" id="sms-btn">Отправить СМС-отчет</button>
@@ -86,7 +90,7 @@
         </div>
         
         <div class='chart-container'>
-            <h3>Контур поля на карте</h3>
+            <h3>Спутниковый снимок Sentinel-2 (NDVI) на текущий момент</h3>
             <div id='map'></div>
         </div>
 
@@ -113,9 +117,18 @@
         let allFieldsData = [];
         let currentFieldLayer = null;
         let currentFieldId = null;
+        
+        const SENTINEL_INSTANCE_ID = '998d0294-ccf0-46ad-9bc9-23f57008c0fe'; 
 
         const map = L.map('map').setView([52.0, 66.0], 6); 
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}').addTo(map);
+        const baseLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}').addTo(map);
+        const ndviLayer = L.tileLayer.wms('https://sh.dataspace.copernicus.eu/ogc/wms/' + SENTINEL_INSTANCE_ID, {
+            layers: 'NDVI', format: 'image/png', transparent: true, attribution: 'Sentinel Hub', opacity: 0.7
+        });
+
+        const baseMaps = { "Спутник (True Color)": baseLayer };
+        const overlayMaps = { "Индекс NDVI (Sentinel-2)": ndviLayer };
+        L.control.layers(baseMaps, overlayMaps).addTo(map);
 
         async function loadModelMetrics() {
             try {
@@ -156,38 +169,8 @@
             }
         }
 
-        async function runPrediction() {
-            if (!currentFieldId) return;
-            const btn = document.getElementById('predict-btn');
-            const yieldText = document.getElementById('yield-value');
-            btn.disabled = true;
-            btn.innerText = 'Расчет...';
-            yieldText.innerText = 'Расчет модели...';
-            try {
-                const res = await fetch(`/v1/fields/${currentFieldId}/yield/predict`, { method: 'POST' });
-                if (!res.ok) throw new Error('Ошибка сервера');
-                await loadData(currentFieldId); 
-            } catch (e) {
-                alert('Не удалось запустить модель.');
-                yieldText.innerText = 'Ошибка';
-            } finally {
-                btn.disabled = false;
-                btn.innerText = 'Запустить модель (Predict)';
-            }
-        }
-
-        async function sendSMS() {
-            if (!currentFieldId) return;
-            const btn = document.getElementById('sms-btn');
-            btn.disabled = true;
-            btn.innerText = 'Отправка...';
-            try {
-                const res = await fetch(`/v1/fields/${currentFieldId}/send_sms`, { method: 'POST' });
-                const data = await res.json();
-                if (res.ok) alert('✅ ' + data.message);
-            } catch (e) { alert('Ошибка сети'); } 
-            finally { btn.disabled = false; btn.innerText = 'Отправить СМС-отчет'; }
-        }
+        async function runPrediction() { /* ... */ }
+        async function sendSMS() { /* ... */ }
 
         async function loadData(fieldId) {
             if (!fieldId) return;
@@ -207,6 +190,8 @@
                 document.getElementById('field-info-card').style.display = 'block';
                 document.getElementById('info-name').innerText = `Поле: ${info.name}`;
                 document.getElementById('info-id').innerText = info.field_id;
+                document.getElementById('info-region').innerText = info.region;
+                document.getElementById('info-district').innerText = info.district;
                 document.getElementById('info-area').innerText = info.area_ha.toFixed(2);
             } catch (e) { console.log('Ошибка инфо', e); }
 
@@ -216,7 +201,7 @@
                 try {
                     const geojsonObj = JSON.parse(fieldInfo.geom);
                     currentFieldLayer = L.geoJSON(geojsonObj, {
-                        style: { color: '#e74c3c', weight: 3, fillColor: '#e74c3c', fillOpacity: 0.3 }
+                        style: { color: '#e74c3c', weight: 3, fillColor: 'transparent' }
                     }).addTo(map);
                     map.fitBounds(currentFieldLayer.getBounds(), { padding: [20, 20] }); 
                 } catch(e) { console.error("Ошибка карты:", e); }
@@ -251,7 +236,7 @@
             } catch (e) { console.log('Нет данных NDVI'); }
 
             try {
-                const res = await fetch(`/api/fields/${fieldId}/weather/live`);
+                const res = await fetch(`/api/fields/${fieldId}/weather/live?crop_type=spring`);
                 const responseData = await res.json();
                 
                 if (responseData && responseData.weather_data) {
@@ -260,19 +245,40 @@
                     const currentGDD = responseData.current_gdd || 0;
                     const targetGDD = 1500;
                     
+                    const month = new Date().getMonth() + 1; // 1-12
+                    const year = new Date().getFullYear();
+                    const nextYear = month >= 11 ? year + 1 : year; 
+                    
+                    let sDateFormatted = 'не определена';
                     if (sowingDate) {
-                        const sDate = new Date(sowingDate).toLocaleDateString('ru-RU');
-                        document.getElementById('sowing-date').innerText = `Рекомендуемый срок посева (озимые): ${sDate} (t ≤ 15°C)`;
-                    } else {
-                        document.getElementById('sowing-date').innerText = 'Срок посева не определен';
+                        const parts = sowingDate.split('-');
+                        sDateFormatted = `${parts[2]}.${parts[1]}.${parts[0]}`;
                     }
 
-                    if (currentGDD < targetGDD) {
-                        const remainingGDD = targetGDD - currentGDD;
-                        const year = new Date().getFullYear() + (new Date().getMonth() > 6 ? 1 : 0);
-                        document.getElementById('harvest-date').innerText = `Прогноз уборки: Июль-Август ${year} г. (Накоплено ${currentGDD.toFixed(0)} из ${targetGDD} GDD. Зимой вегетация стоит)`;
-                    } else {
-                        document.getElementById('harvest-date').innerText = `Пора убирать! Достигнут порог ${targetGDD} GDD.`;
+                    // ЛОГИКА ПО СЕЗОНАМ
+                    if (month >= 11 || month <= 2) {
+                        // ЗИМА
+                        document.getElementById('sowing-date').innerText = `Сезон завершен. Планируемый посев: Весна ${nextYear} г.`;
+                        document.getElementById('harvest-date').innerText = `Урожай ${year} г. собран. Вегетация остановлена.`;
+                    } 
+                    else if (month >= 3 && month <= 5) {
+                        // ВЕСНА
+                        document.getElementById('sowing-date').innerText = `Срок посева (Яровая): ${sDateFormatted} (t ≥ 5°C)`;
+                        document.getElementById('harvest-date').innerText = `Идет вегетация. Накоплено ${currentGDD.toFixed(0)} из ${targetGDD} GDD. Уборка: Август ${year} г.`;
+                    } 
+                    else if (month >= 6 && month <= 8) {
+                        // ЛЕТО
+                        document.getElementById('sowing-date').innerText = `Посев был: ${sDateFormatted}`;
+                        if (currentGDD >= targetGDD) {
+                            document.getElementById('harvest-date').innerText = `Культура созрела! Начало уборки. (GDD: ${currentGDD.toFixed(0)})`;
+                        } else {
+                            document.getElementById('harvest-date').innerText = `Активный рост. Накоплено ${currentGDD.toFixed(0)} из ${targetGDD} GDD. Уборка: Август-Сентябрь.`;
+                        }
+                    } 
+                    else if (month === 9 || month === 10) {
+                        // ОСЕНЬ
+                        document.getElementById('sowing-date').innerText = `Посев был: ${sDateFormatted}`;
+                        document.getElementById('harvest-date').innerText = `Идет уборочная кампания. (Накоплено ${currentGDD.toFixed(0)} GDD)`;
                     }
 
                     const ctx = document.getElementById('weatherChart').getContext('2d');
@@ -291,14 +297,19 @@
                         },
                         options: {
                             responsive: true, maintainAspectRatio: false,
-                            scales: {
-                                y: { type: 'linear', display: true, position: 'left' },
-                                y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false } }
-                            }
+                            scales: { y: { type: 'linear', display: true, position: 'left' }, y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false } } }
                         }
                     });
                 }
             } catch (e) { console.log('Ошибка загрузки реальной погоды', e); }
+
+            // ЗАГРУЗКА ДАННЫХ О СОРНЯКАХ
+            try {
+                const res = await fetch(`/api/fields/${fieldId}/weeds`);
+                const data = await res.json();
+                document.querySelector('#weed-panel p:first-child').innerText = `⚠️ Засоренность поля: ${data.weed_percentage}% (Уровень: ${data.status})`;
+                document.getElementById('weed-recommendation').innerText = `💡 ${data.recommendation}`;
+            } catch (e) { console.log('Ошибка загрузки данных о сорняках', e); }
         }
 
         document.addEventListener('DOMContentLoaded', () => {

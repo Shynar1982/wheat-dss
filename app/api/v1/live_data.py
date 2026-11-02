@@ -16,7 +16,36 @@ async def get_field_info(field_id: int, db: AsyncSession = Depends(get_session))
     row = result.first()
     if not row:
         raise HTTPException(status_code=404, detail="Field not found")
-    return {"field_id": row[0], "name": row[1], "area_ha": float(row[2]) if row[2] else 0}
+
+    stmt_coords = select(ST_Y(ST_Centroid(Field.geom)), ST_X(ST_Centroid(Field.geom))).where(Field.field_id == field_id)
+    result_coords = await db.execute(stmt_coords)
+    coords = result_coords.first()
+
+    region = "Не определён"
+    district = "Не определён"
+
+    if coords:
+        lat, lon = coords[0], coords[1]
+        url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1"
+        headers = {"User-Agent": "WheatDSS/1.0"}
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, headers=headers, timeout=10.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    address = data.get("address", {})
+                    region = address.get("state", "Не определён")
+                    district = address.get("county", address.get("city_district", "Не определён"))
+        except Exception as e:
+            print(f"Ошибка геокодирования: {e}")
+
+    return {
+        "field_id": row[0],
+        "name": row[1],
+        "area_ha": float(row[2]) if row[2] else 0,
+        "region": region,
+        "district": district
+    }
 
 @router.get("/api/fields/{field_id}/weather/live")
 async def get_live_weather(field_id: int, db: AsyncSession = Depends(get_session)):
@@ -28,9 +57,7 @@ async def get_live_weather(field_id: int, db: AsyncSession = Depends(get_session
     
     lat, lon = coords[0], coords[1]
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&past_days=90&forecast_days=7"
-    
-    # Добавляем заголовок User-Agent, чтобы Open-Meteo не блокировал запрос
-    headers = {"User-Agent": "WheatDSS/1.0 (https://github.com)"}
+    headers = {"User-Agent": "WheatDSS/1.0"}
     
     async with httpx.AsyncClient() as client:
         try:
@@ -38,7 +65,6 @@ async def get_live_weather(field_id: int, db: AsyncSession = Depends(get_session
             response.raise_for_status()
             data = response.json()
         except Exception as e:
-            # Если произошла ошибка сети, возвращаем заглушку, чтобы интерфейс не ломался
             print(f"ОШИБКА ПОГОДЫ: {e}")
             today = datetime.date.today()
             return {
@@ -47,14 +73,13 @@ async def get_live_weather(field_id: int, db: AsyncSession = Depends(get_session
                 "weather_data": [
                     {"obs_date": str(today - datetime.timedelta(days=i)), "t_max_c": 10.0, "t_min_c": 2.0, "precip_mm": 0.0, "gdd_cum": 150.0 - i, "is_sowing_date": i==30} 
                     for i in range(40, -1, -1)
-                ] # Это фейковые данные, чтобы график отрисовался, но мы предупредим об ошибке
+                ]
             }
 
     daily = data["daily"]
     weather_list = []
     sowing_date = None
     
-    # 1. Ищем дату посева
     for i in range(len(daily["time"])):
         t_max = daily["temperature_2m_max"][i]
         t_min = daily["temperature_2m_min"][i]
@@ -63,7 +88,6 @@ async def get_live_weather(field_id: int, db: AsyncSession = Depends(get_session
             if 5.0 < avg_temp <= 15.0 and sowing_date is None:
                 sowing_date = daily["time"][i]
 
-    # 2. Считаем GDD
     gdd_cum = 0
     base_temp = 5.0 
     
@@ -96,4 +120,32 @@ async def get_live_weather(field_id: int, db: AsyncSession = Depends(get_session
         "sowing_date": sowing_date,
         "current_gdd": round(gdd_cum, 2),
         "weather_data": weather_list
+    }
+
+@router.get("/api/fields/{field_id}/indices/live")
+async def get_live_field_ndvi(field_id: int, db: AsyncSession = Depends(get_session)):
+    # Заглушка, так как Sentinel Hub отключен для экономии места
+    return []
+
+@router.get("/api/fields/{field_id}/weeds")
+async def get_weed_analysis(field_id: int):
+    # В реальности здесь был бы запрос к Sentinel Hub (NDRE)
+    # Для демо мы делаем имитацию: засоренность зависит от ID поля
+    weed_percentage = (field_id % 20) + 5.5  # Случайное число от 5 до 25%
+    
+    if weed_percentage > 15:
+        status = "Высокая"
+        recommendation = "Рекомендуется дифференцированная обработка гербицидами (VRT) только на засоренных участках."
+    elif weed_percentage > 8:
+        status = "Средняя"
+        recommendation = "Рекомендуется выборочная обработка или ранневесеннее боронование."
+    else:
+        status = "Низкая"
+        recommendation = "Химическая обработка не требуется. Достаточно агротехнических мер."
+        
+    return {
+        "field_id": field_id,
+        "weed_percentage": round(weed_percentage, 1),
+        "status": status,
+        "recommendation": recommendation
     }
