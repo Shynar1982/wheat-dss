@@ -9,19 +9,6 @@ import datetime
 import math
 import json
 
-SENTINEL_AVAILABLE = False
-try:
-    import os
-    from sentinelhub import SHConfig, SentinelHubStatistical, DataCollection, CRS, Geometry
-    SENTINEL_AVAILABLE = True
-    sh_config = SHConfig()
-    sh_config.sh_client_id = os.getenv("SH_CLIENT_ID")
-    sh_config.sh_client_secret = os.getenv("SH_CLIENT_SECRET")
-    sh_config.sh_base_url = "https://sh.dataspace.copernicus.eu"
-    sh_config.sh_auth_base_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
-except ImportError:
-    pass
-
 router = APIRouter(tags=["live"])
 
 @router.get("/api/fields/{field_id}/info")
@@ -29,8 +16,7 @@ async def get_field_info(field_id: int, db: AsyncSession = Depends(get_session))
     stmt = select(Field.field_id, Field.name, Field.area_ha).where(Field.field_id == field_id)
     result = await db.execute(stmt)
     row = result.first()
-    if not row:
-        raise HTTPException(status_code=404, detail="Field not found")
+    if not row: raise HTTPException(status_code=404, detail="Field not found")
 
     stmt_coords = select(ST_Y(ST_Centroid(Field.geom)), ST_X(ST_Centroid(Field.geom))).where(Field.field_id == field_id)
     result_coords = await db.execute(stmt_coords)
@@ -42,7 +28,7 @@ async def get_field_info(field_id: int, db: AsyncSession = Depends(get_session))
         url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1"
         headers = {"User-Agent": "WheatDSS/1.0"}
         async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers, timeout=5.0)
+            resp = await client.get(url, headers=headers, timeout=3.0)
             if resp.status_code == 200:
                 data = resp.json().get("address", {})
                 region = data.get("state", "Не определён")
@@ -56,21 +42,18 @@ async def get_fertilizer_recommendation(field_id: int, sim_month: int = Query(0)
     stmt = select(Field.area_ha).where(Field.field_id == field_id)
     result = await db.execute(stmt)
     area_ha = result.scalar() or 20.0
-    
-    # ИСПОЛЬЗУЕМ ВЫБРАННЫЙ МЕСЯЦ
     month = sim_month if sim_month != 0 else datetime.datetime.now().month
 
     if month >= 11 or month <= 2:
         return {"status": "winter", "message": "Зимний период: внесение удобрений не требуется.", "recommendations": []}
 
-    predicted_yield = 4.453 # Берем прогноз с дашборда
-    n_norm, p_norm, k_norm = 27, 11.5, 20.5
-    total_n, total_p, total_k = predicted_yield * n_norm, predicted_yield * p_norm, predicted_yield * k_norm
+    predicted_yield = 4.131
+    total_n, total_p, total_k = predicted_yield * 27, predicted_yield * 11.5, predicted_yield * 20.5
     n_pre, n_top = total_n * 0.6, total_n * 0.4
     
     recs = [
-        {"phase": "Предпосевное", "nutrient": "Фосфор (P₂O₅)", "dose_kg_ha": round(total_p / area_ha, 1), "total_kg": round(total_p, 1), "note": "Вносится под культивацию."},
-        {"phase": "Предпосевное", "nutrient": "Калий (K₂O)", "dose_kg_ha": round(total_k / area_ha, 1), "total_kg": round(total_k, 1), "note": "Вносится под культивацию."},
+        {"phase": "Предпосевное", "nutrient": "Фосфор (P₂O₅)", "dose_kg_ha": round(total_p / area_ha, 1), "total_kg": round(total_p, 1), "note": "Под культивацию."},
+        {"phase": "Предпосевное", "nutrient": "Калий (K₂O)", "dose_kg_ha": round(total_k / area_ha, 1), "total_kg": round(total_k, 1), "note": "Под культивацию."},
         {"phase": "Предпосевное", "nutrient": "Азот (N)", "dose_kg_ha": round(n_pre / area_ha, 1), "total_kg": round(n_pre, 1), "note": "60% от нормы."},
         {"phase": "Подкормка (кущение)", "nutrient": "Азот (N)", "dose_kg_ha": round(n_top / area_ha, 1), "total_kg": round(n_top, 1), "note": "40% от нормы."}
     ]
@@ -100,7 +83,7 @@ async def get_agro_forecast(field_id: int, sim_month: int = Query(0), db: AsyncS
     if today > sowing_end:
         result_data["sowing"] = {"status": "missed", "message": "Посевное окно завершено.", "details": ""}
     elif today < sowing_start:
-        result_data["sowing"] = {"status": "early", "message": f"До посева {(sowing_start - today).days} дней.", "details": f"Ожидаемая продолжительность сева: {sowing_days} дн."}
+        result_data["sowing"] = {"status": "early", "message": f"До посева {(sowing_start - today).days} дней.", "details": f"Сев займет {sowing_days} дн."}
     else:
         best_sowing_day = min(today + datetime.timedelta(days=2), sowing_end)
         end_sowing_date = best_sowing_day + datetime.timedelta(days=sowing_days)
@@ -126,36 +109,25 @@ async def get_agro_forecast(field_id: int, sim_month: int = Query(0), db: AsyncS
 
 @router.get("/api/fields/{field_id}/real_data")
 async def get_real_data(field_id: int, db: AsyncSession = Depends(get_session)):
-    stmt_geom = select(ST_AsGeoJSON(Field.geom)).where(Field.field_id == field_id)
-    result_geom = await db.execute(stmt_geom)
-    geom_json = result_geom.scalar()
-    if not geom_json: raise HTTPException(status_code=404, detail="Field geometry not found")
-    geom_dict = json.loads(geom_json)
-    
+    # Для демо используем координаты Давыденовки
     url = f"https://archive-api.open-meteo.com/v1/archive?latitude=52.9&longitude=66.2&start_date=2024-03-01&end_date=2024-09-30&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto"
     weather_data = []
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(url, timeout=15.0)
+            resp = await client.get(url, timeout=10.0)
             if resp.status_code == 200:
                 raw = resp.json().get("daily", {})
                 times, t_max, t_min, precip = raw.get("time", []), raw.get("temperature_2m_max", []), raw.get("temperature_2m_min", []), raw.get("precipitation_sum", [])
                 for i in range(len(times)):
-                    weather_data.append({"obs_date": times[i], "t_max_c": t_max[i] if i < len(t_max) else None, "t_min_c": t_min[i] if i < len(t_min) else None, "precip_mm": precip[i] if i < len(precip) else 0})
+                    weather_data.append({"obs_date": times[i], "t_max_c": t_max[i], "t_min_c": t_min[i], "precip_mm": precip[i]})
     except Exception: pass
     
-    sowing_date = None
-    for day in weather_data:
-        if day["obs_date"] >= "2024-05-10" and day["t_max_c"] is not None and day["t_max_c"] >= 5.0:
-            sowing_date = day["obs_date"]
-            break
-    
+    sowing_date = "2024-05-17" # Фиксируем для демо
     gdd_series, gdd_cum = [], 0
     for day in weather_data:
         date_str = day["obs_date"]
-        if sowing_date and date_str >= sowing_date and day["t_max_c"] is not None:
-            avg_temp = (day["t_max_c"] + day["t_min_c"]) / 2
-            gdd_cum += max(0, avg_temp - 5.0)
+        if date_str >= sowing_date and day["t_max_c"] is not None:
+            gdd_cum += max(0, ((day["t_max_c"] + day["t_min_c"]) / 2) - 5.0)
         gdd_series.append({"obs_date": date_str, "gdd_cum": round(gdd_cum, 2)})
     
-    return {"weather": weather_data, "gdd": gdd_series, "sowing_date": sowing_date, "current_gdd": round(gdd_cum, 2), "ndre_mean": None, "weed_percentage": None, "n_dose_kg_ha": 0}
+    return {"weather": weather_data, "gdd": gdd_series, "sowing_date": sowing_date, "current_gdd": round(gdd_cum, 2)}

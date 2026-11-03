@@ -250,6 +250,7 @@
                 const res = await fetch(`/v1/fields/${fieldId}/yield/predictions`);
                 const data = await res.json();
                 const currentM = simMonth === 0 ? (new Date().getMonth() + 1) : simMonth;
+                document.getElementById('yield-title').innerText = (currentM >= 9 || currentM <= 2) ? 'Итоговая урожайность' : 'Прогноз урожайности';
                 const realYear = new Date().getFullYear();
                 const currentY = (simMonth === 0) ? realYear : 2024;
                 
@@ -267,6 +268,7 @@
                 const res = await fetch(`/v1/fields/${fieldId}/recommendations`);
                 const data = await res.json();
                 const currentM = simMonth === 0 ? (new Date().getMonth() + 1) : simMonth;
+                document.getElementById('yield-title').innerText = (currentM >= 9 || currentM <= 2) ? 'Итоговая урожайность' : 'Прогноз урожайности';
                 document.getElementById('rec-text').innerText = (currentM >= 11 || currentM <= 2) 
                     ? 'Зимний период: внесение удобрений не требуется.' 
                     : ((data && data.length > 0) ? data[0].message_text : 'Нет рекомендаций');
