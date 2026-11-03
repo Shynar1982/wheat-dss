@@ -193,3 +193,115 @@ async def get_agro_forecast(field_id: int, sim_month: int = Query(0), db: AsyncS
             result_data["harvest"] = {"status": "risk", "message": f"Риск! Начало уборки: {best_harvest_day.strftime('%d.%m')}.", "details": f"Площадь {area_ha:.1f} га. Уборка займет {harvest_days} дн. Завершение {end_harvest_date.strftime('%d.%m')} выходит за пределы (20.09)!"}
 
     return result_data
+
+@router.get("/api/fields/{field_id}/fertilizer")
+async def get_fertilizer_recommendation(
+    field_id: int,
+    sim_month: int = Query(0),
+    db: AsyncSession = Depends(get_session)
+):
+    # 1. Получаем площадь и прогноз урожайности
+    stmt = select(Field.area_ha).where(Field.field_id == field_id)
+    result = await db.execute(stmt)
+    area_ha = result.scalar() or 20.0
+
+    # Получаем последний прогноз урожайности (для расчета выноса)
+    stmt_yield = select(YieldPrediction.predicted_yield_t_ha).where(YieldPrediction.field_id == field_id).order_by(YieldPrediction.prediction_date.desc()).limit(1)
+    result_yield = await db.execute(stmt_yield)
+    predicted_yield_t_ha = result_yield.scalar() or 2.0 # По умолчанию 2 т/га, если прогноза нет
+
+    # 2. Получаем NDVI для корректировки дозы
+    stmt_ndvi = select(FieldNDVI.ndvi).where(FieldNDVI.field_id == field_id).order_by(FieldNDVI.observed_at.desc()).limit(1)
+    result_ndvi = await db.execute(stmt_ndvi)
+    ndvi = result_ndvi.scalar() or 0.4
+
+    # 3. Определяем текущий месяц
+    month = sim_month if sim_month != 0 else datetime.datetime.now().month
+
+    # 4. Зимой не удобряем
+    if month >= 11 or month <= 2:
+        return {
+            "status": "winter",
+            "message": "Зимний период: внесение удобрений не требуется.",
+            "recommendations": [],
+            "total_kg": 0
+        }
+
+    # 5. Расчет выноса питательных веществ на планируемую урожайность
+    # Нормы выноса на 1 т зерна (с учетом соломы): N: 24-30, P2O5: 10-13, K2O: 16-25
+    n_norm_per_t = 27 # среднее значение
+    p_norm_per_t = 11.5
+    k_norm_per_t = 20.5
+    
+    total_n_need = predicted_yield_t_ha * n_norm_per_t
+    total_p_need = predicted_yield_t_ha * p_norm_per_t
+    total_k_need = predicted_yield_t_ha * k_norm_per_t
+
+    # 6. Формируем рекомендации по фазам
+    recommendations = []
+    
+    # Фосфор и калий: все в предпосевное внесение
+    if total_p_need > 0:
+        recommendations.append({
+            "phase": "Предпосевное (основное)",
+            "nutrient": "Фосфор (P₂O₅)",
+            "dose_kg_ha": round(total_p_need / area_ha, 1),
+            "total_kg": round(total_p_need, 1),
+            "note": "Вносится под предпосевную культивацию."
+        })
+    if total_k_need > 0:
+        recommendations.append({
+            "phase": "Предпосевное (основное)",
+            "nutrient": "Калий (K₂O)",
+            "dose_kg_ha": round(total_k_need / area_ha, 1),
+            "total_kg": round(total_k_need, 1),
+            "note": "Вносится под предпосевную культивацию."
+        })
+
+    # Азот: дробное внесение
+    # 60% - предпосевное, 40% - подкормка в кущение/трубкование
+    n_pre_sowing = total_n_need * 0.6
+    n_top_dressing_base = total_n_need * 0.4
+
+    # Корректировка подкормки по NDVI
+    if ndvi < 0.3:
+        ndvi_factor = 1.2 # Дефицит азота, увеличиваем дозу на 20%
+        ndvi_note = "Низкий NDVI (<0.3): повышенная потребность в азоте."
+    elif ndvi < 0.5:
+        ndvi_factor = 1.0 # Норма
+        ndvi_note = "Средний NDVI (0.3-0.5): стандартная доза."
+    else:
+        ndvi_factor = 0.7 # Достаточно азота, снижаем дозу
+        ndvi_note = "Высокий NDVI (>0.5): растения хорошо обеспечены азотом."
+
+    n_top_dressing_actual = n_top_dressing_base * ndvi_factor
+
+    recommendations.append({
+        "phase": "Предпосевное (основное)",
+        "nutrient": "Азот (N)",
+        "dose_kg_ha": round(n_pre_sowing / area_ha, 1),
+        "total_kg": round(n_pre_sowing, 1),
+        "note": "60% от общей потребности. Вносится весной под предпосевную культивацию."
+    })
+
+    if n_top_dressing_actual > 0:
+        recommendations.append({
+            "phase": "Подкормка (фаза кущения/трубкования)",
+            "nutrient": "Азот (N)",
+            "dose_kg_ha": round(n_top_dressing_actual / area_ha, 1),
+            "total_kg": round(n_top_dressing_actual, 1),
+            "note": f"40% от общей потребности, скорректированные по NDVI. {ndvi_note}"
+        })
+
+    # 7. Формируем общее сообщение
+    total_fert_kg = round(n_pre_sowing + n_top_dressing_actual + total_p_need + total_k_need, 1)
+    message = f"Планируемая урожайность: {predicted_yield_t_ha:.1f} т/га. Общая потребность в удобрениях: {total_fert_kg} кг."
+
+    return {
+        "status": "success",
+        "message": message,
+        "ndvi": ndvi,
+        "predicted_yield": predicted_yield_t_ha,
+        "recommendations": recommendations,
+        "total_kg": total_fert_kg
+    }
