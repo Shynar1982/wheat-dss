@@ -47,34 +47,30 @@ async def get_field_info(field_id: int, db: AsyncSession = Depends(get_session))
     }
 
 def generate_mock_weather(start_date, end_date):
-    """Генерирует реалистичную погоду, если внешний API недоступен"""
     weather_data = []
     gdd_data = []
     gdd_cum = 0
     base_temp = 5.0
-    
+    sowing_date_obj = datetime.date(start_date.year, 5, 10)
     current_date = start_date
+    
     while current_date <= end_date:
-        # Генерируем температуру по синусоиде (холодно в марте, жарко в июле)
         day_of_year = current_date.timetuple().tm_yday
-        # Синусоида: от 5 градусов в марте до 28 в июле
-        t_max = 15 + 13 * math.sin(2 * math.pi * (day_of_year - 100) / 365)
-        t_min = t_max - 8 - random.uniform(0, 5)
-        precip = random.uniform(0, 5) if random.random() > 0.7 else 0.0
+        t_max = 20 + 12 * math.sin(2 * math.pi * (day_of_year - 130) / 365) 
+        t_min = t_max - 10 - random.uniform(0, 5)
+        precip = random.uniform(0, 4) if random.random() > 0.75 else 0.0
         
-        avg_temp = (t_max + t_min) / 2
-        if avg_temp >= base_temp:
-            gdd_cum += max(0, avg_temp - base_temp)
-            
+        if current_date >= sowing_date_obj:
+            avg_temp = (t_max + t_min) / 2
+            if avg_temp > base_temp:
+                gdd_cum += (avg_temp - base_temp)
+                
         date_str = current_date.strftime("%Y-%m-%d")
-        weather_data.append({
-            "obs_date": date_str, "t_max_c": round(t_max, 1), "t_min_c": round(t_min, 1), "precip_mm": round(precip, 1)
-        })
+        weather_data.append({"obs_date": date_str, "t_max_c": round(t_max, 1), "t_min_c": round(t_min, 1), "precip_mm": round(precip, 1)})
         gdd_data.append({"obs_date": date_str, "gdd_cum": round(gdd_cum, 2)})
-        
         current_date += datetime.timedelta(days=1)
         
-    return weather_data, gdd_data
+    return weather_data, gdd_data, sowing_date_obj.strftime("%Y-%m-%d")
 
 @router.get("/api/fields/{field_id}/weather/historical")
 async def get_historical_weather(
@@ -90,21 +86,16 @@ async def get_historical_weather(
     
     lat, lon = coords[0], coords[1]
     current_month = sim_month if sim_month != 0 else datetime.datetime.now().month
-    sim_year = 2024
-
-    start_date_obj = datetime.date(sim_year, 3, 1)
-    end_date_obj = datetime.date(sim_year, 10, 1)
+    start_date_obj = datetime.date(2024, 3, 1)
+    end_date_obj = datetime.date(2024, 10, 1)
     
     url = f"https://archive-api.open-meteo.com/v1/archive?latitude={lat}&longitude={lon}&start_date={start_date_obj}&end_date={end_date_obj}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto"
     headers = {"User-Agent": "WheatDSS/1.0"}
     
-    weather_list = []
-    gdd_list = []
-    sowing_date = None
-    gdd_cum = 0
+    weather_list, gdd_list, sowing_date, gdd_cum = [], [], None, 0
     base_temp = 5.0 
-
     api_success = False
+    
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url, headers=headers, timeout=10.0)
@@ -112,44 +103,31 @@ async def get_historical_weather(
                 daily = response.json().get("daily", {})
                 if daily and daily.get("time"):
                     for i in range(len(daily["time"])):
-                        t_max = daily["temperature_2m_max"][i]
-                        t_min = daily["temperature_2m_min"][i]
-                        precip = daily["precipitation_sum"][i]
-                        current_date_str = daily["time"][i]
+                        t_max, t_min = daily["temperature_2m_max"][i], daily["temperature_2m_min"][i]
+                        precip, current_date_str = daily["precipitation_sum"][i], daily["time"][i]
                         
                         if t_max is not None and t_min is not None:
                             avg_temp = (t_max + t_min) / 2
-                            if current_date_str[5:7] in ['03', '04', '05'] and avg_temp >= 5.0 and sowing_date is None:
+                            if current_date_str[5:7] in ['03', '04', '05'] and avg_temp >= 10.0 and sowing_date is None:
                                 sowing_date = current_date_str
                                 
                         if sowing_date and current_date_str >= sowing_date:
                             if t_max is not None and t_min is not None:
-                                avg_temp = (t_max + t_min) / 2
-                                gdd_cum += max(0, avg_temp - base_temp)
+                                gdd_cum += max(0, ((t_max + t_min) / 2) - base_temp)
                                 
                         weather_list.append({"obs_date": current_date_str, "t_max_c": t_max or 0, "t_min_c": t_min or 0, "precip_mm": precip or 0})
                         gdd_list.append({"obs_date": current_date_str, "gdd_cum": round(gdd_cum, 2)})
                     api_success = True
-    except Exception as e:
+    except Exception:
         pass
 
-    # Если внешний API упал или вернул пустоту, включаем генератор
     if not api_success or not weather_list:
-        weather_list, gdd_list = generate_mock_weather(start_date_obj, end_date_obj)
-        # Находим дату посева в сгенерированных данных
-        for w in weather_list:
-            if w["obs_date"][5:7] in ['03', '04', '05'] and w["t_max_c"] >= 10.0: # Условный порог для мока
-                sowing_date = w["obs_date"]
-                break
-        # Пересчитываем GDD до конца для мока
+        weather_list, gdd_list, sowing_date = generate_mock_weather(start_date_obj, end_date_obj)
         gdd_cum = gdd_list[-1]["gdd_cum"] if gdd_list else 0
 
     return {
-        "current_month": current_month,
-        "sowing_date": sowing_date,
-        "current_gdd": round(gdd_cum, 2),
-        "weather_data": weather_list,
-        "gdd_data": gdd_list
+        "current_month": current_month, "sowing_date": sowing_date,
+        "current_gdd": round(gdd_cum, 2), "weather_data": weather_list, "gdd_data": gdd_list
     }
 
 @router.get("/api/fields/{field_id}/weeds")
@@ -157,7 +135,6 @@ async def get_weed_analysis(field_id: int, sim_month: int = Query(0)):
     month = sim_month if sim_month != 0 else datetime.datetime.now().month
     if month >= 11 or month <= 2:
         return {"field_id": field_id, "weed_percentage": 0, "status": "Сезон завершен", "recommendation": "Зимний период: сорняки в состоянии покоя."}
-        
     weed_percentage = (field_id % 20) + 5.5 
     if weed_percentage > 15:
         return {"field_id": field_id, "weed_percentage": round(weed_percentage, 1), "status": "Высокая", "recommendation": "Рекомендуется дифференцированная обработка гербицидами (VRT)."}
@@ -165,3 +142,54 @@ async def get_weed_analysis(field_id: int, sim_month: int = Query(0)):
         return {"field_id": field_id, "weed_percentage": round(weed_percentage, 1), "status": "Средняя", "recommendation": "Рекомендуется выборочная обработка или боронование."}
     else:
         return {"field_id": field_id, "weed_percentage": round(weed_percentage, 1), "status": "Низкая", "recommendation": "Химическая обработка не требуется."}
+
+@router.get("/api/fields/{field_id}/agro_forecast")
+async def get_agro_forecast(field_id: int, sim_month: int = Query(0), db: AsyncSession = Depends(get_session)):
+    # 1. Получаем площадь поля
+    stmt = select(Field.area_ha).where(Field.field_id == field_id)
+    result = await db.execute(stmt)
+    area_ha = result.scalar() or 20.0
+
+    current_month = sim_month if sim_month != 0 else datetime.datetime.now().month
+    today = datetime.date(2024, current_month, 15) if current_month != 0 else datetime.date.today()
+
+    SOWING_RATE = 50.0  # га/день
+    HARVEST_RATE = 15.0 # га/день
+    
+    sowing_days = math.ceil(area_ha / SOWING_RATE)
+    harvest_days = math.ceil(area_ha / HARVEST_RATE)
+    result_data = {}
+
+    # Логика посева
+    sowing_start, sowing_end = datetime.date(2024, 5, 10), datetime.date(2024, 5, 25)
+    if today > sowing_end:
+        result_data["sowing"] = {"status": "missed", "message": "Посевное окно завершено.", "details": ""}
+    elif today < sowing_start:
+        result_data["sowing"] = {"status": "early", "message": f"До посева {(sowing_start - today).days} дней.", "details": f"Ожидаемая продолжительность сева: {sowing_days} дн. (площадь {area_ha:.1f} га)"}
+    else:
+        best_sowing_day = today + datetime.timedelta(days=2)
+        if best_sowing_day > sowing_end: best_sowing_day = sowing_end
+        end_sowing_date = best_sowing_day + datetime.timedelta(days=sowing_days)
+        
+        if end_sowing_date <= sowing_end:
+            result_data["sowing"] = {"status": "success", "message": f"Успеваем! Начало сева: {best_sowing_day.strftime('%d.%m')}.", "details": f"Площадь {area_ha:.1f} га. Сев займет {sowing_days} дн. Завершение: {end_sowing_date.strftime('%d.%m')}."}
+        else:
+            result_data["sowing"] = {"status": "risk", "message": f"Риск! Начало сева: {best_sowing_day.strftime('%d.%m')}.", "details": f"Площадь {area_ha:.1f} га. Сев займет {sowing_days} дн. Завершение {end_sowing_date.strftime('%d.%m')} выходит за пределы (25.05)!"}
+
+    # Логика уборки
+    harvest_start, harvest_end = datetime.date(2024, 8, 10), datetime.date(2024, 9, 20)
+    if today < harvest_start:
+        result_data["harvest"] = {"status": "early", "message": "Уборка еще не началась.", "details": f"Ожидаемая продолжительность: {harvest_days} дн. (площадь {area_ha:.1f} га)"}
+    elif today > harvest_end:
+        result_data["harvest"] = {"status": "missed", "message": "Уборочная кампания завершена.", "details": ""}
+    else:
+        best_harvest_day = today + datetime.timedelta(days=1)
+        if best_harvest_day > harvest_end: best_harvest_day = harvest_end
+        end_harvest_date = best_harvest_day + datetime.timedelta(days=harvest_days)
+        
+        if end_harvest_date <= harvest_end:
+            result_data["harvest"] = {"status": "success", "message": f"Успеваем! Начало уборки: {best_harvest_day.strftime('%d.%m')}.", "details": f"Площадь {area_ha:.1f} га. Уборка займет {harvest_days} дн. Завершение: {end_harvest_date.strftime('%d.%m')}."}
+        else:
+            result_data["harvest"] = {"status": "risk", "message": f"Риск! Начало уборки: {best_harvest_day.strftime('%d.%m')}.", "details": f"Площадь {area_ha:.1f} га. Уборка займет {harvest_days} дн. Завершение {end_harvest_date.strftime('%d.%m')} выходит за пределы (20.09)!"}
+
+    return result_data
