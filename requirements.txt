@@ -14,3 +14,4 @@ scikit-learn
 pandas
 joblib
 jinja2
+pandas
